@@ -58,7 +58,7 @@ flowchart TB
 
 **Bootstrap vs procgen:** **`loadRoadTextures`** runs **once** after the manifest is fetched; it does **not** read the L-string and does **not** affect **`generateProcgenDescriptor`**. It only populates optional **`THREE.Texture`** references on the materials object passed into **`LevelLoader.build`**. If loading fails, **`roadStraight`** is absent and §5.8 fallback applies.
 
-1. **`levels.json`** supplies `levelCount`, `levelNames`, and `procgen: true` (read before first level; same fetch is the entry point for the procgen pipeline below).
+1. **`levels.json`** supplies `procgen: true`, optional **`levelCount`** (finite run), optional **`infiniteLevels`** (procgen run does not end after `levelCount`), and `schemaVersion` (read before first level; same fetch is the entry point for the procgen pipeline below). The HUD uses **1-based numeric labels** from the level index, not a name list.
 2. **Spine string:** **`composeRhythmSpineString`** (default) or **`expandLSystem`** with the axiom and **non-branching** spine rules (§3.2) — one **main forward** route. A **connectivity audit** (`auditStaticPathGaps`) runs after the turtle; failed audits **append** forward symbols to the core and **rebuild** (capped by **`comptonRhythmRepairMaxPasses`**).
 3. **Budget passes** (§§3.4–3.5) may **append** **`+`/`-`** and **`r`** symbols so **turn** and **vertical** minimums are met **deterministically**.
 4. **`preferRampsOverStepJumps`** may rewrite many **`^F`** pairs into **`r`** (sloped ramp) for a clearer **floating-course** read.
@@ -342,7 +342,7 @@ Changing **§5.8** texture filenames, **`ROAD_TEXTURE_TILE_UNITS`**, face-select
 
 ## 7. Relation to the game manifest
 
-`levels/levels.json` uses **`schemaVersion: 2`**, **`procgen: true`**, **`levelCount`**, and **`levelNames`**. Individual levels are **not** stored as JSON arrays of boxes; the manifest only drives **how many** rungs exist and how they are **titled**.
+`levels/levels.json` uses **`schemaVersion: 2`**, **`procgen: true`**, and optionally **`levelCount`** / **`infiniteLevels`**. Individual levels are **not** stored as JSON arrays of boxes; the manifest only drives **finite vs endless** progression. **`displayName`** in generated descriptors is always the numeric label (**`String(levelIndex + 1)`**).
 
 ---
 

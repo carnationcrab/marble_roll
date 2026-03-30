@@ -70,10 +70,9 @@ function spineRulesForLevel(levelIndex) {
 
 /**
  * @param {number} levelIndex
- * @param {string[]} [levelNames]
  * @returns {object} Level descriptor compatible with LevelLoader.build
  */
-export function generateProcgenDescriptor(levelIndex, levelNames = []) {
+export function generateProcgenDescriptor(levelIndex) {
   const rules = spineRulesForLevel(levelIndex);
   const iterations = procgenLSystemIterations(levelIndex);
   /** Wider turn angle so left/right segments read clearly in plan view (≈38–58°). */
@@ -152,7 +151,7 @@ export function generateProcgenDescriptor(levelIndex, levelNames = []) {
 
   const killPlaneY = computeKillPlaneY(offset.static);
 
-  const displayName = levelNames[levelIndex] ?? String(levelIndex + 1);
+  const displayName = String(levelIndex + 1);
 
   return {
     id: `procgen_${levelIndex}`,

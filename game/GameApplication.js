@@ -28,6 +28,14 @@ function isGoalReached(marblePos, goalCentre, goalRadius, marbleRadius) {
  * @param {{ position: number[], radius: number }} zone
  * @param {number} marbleRadius
  */
+/**
+ * UI and descriptors always use 1-based numeric labels so progression can run without a manifest list.
+ * @param {number} levelIndex
+ */
+function formatLevelLabel(levelIndex) {
+  return String(levelIndex + 1);
+}
+
 function marbleTouchesZone(marblePos, zone, marbleRadius) {
   const px = zone.position[0];
   const py = zone.position[1];
@@ -269,8 +277,10 @@ export class GameApplication {
     this.queue.register('ADVANCE_LEVEL', () => {
       if (!this.bundle) return;
       const count = this.bundle.levelCount ?? this.bundle.levels?.length ?? 0;
+      const infinite =
+        this.bundle.procgen === true && this.bundle.infiniteLevels === true;
       const next = this.session.currentLevelIndex + 1;
-      if (next < count) {
+      if (infinite || next < count) {
         this.session.currentLevelIndex = next;
         this._loadLevelAtIndex(this.session.currentLevelIndex);
         this.states.setState('playing');
@@ -296,13 +306,12 @@ export class GameApplication {
       if (typeof idx === 'number' && idx !== this.session.currentLevelIndex) return;
 
       this.states.setState('levelComplete');
-      const names = this.bundle.levelNames ?? [];
-      const levelName =
-        names[this.session.currentLevelIndex] ??
-        this.bundle.levels?.[this.session.currentLevelIndex]?.displayName ??
-        '';
+      const levelName = formatLevelLabel(this.session.currentLevelIndex);
       const count = this.bundle.levelCount ?? this.bundle.levels?.length ?? 1;
-      const isFinal = this.session.currentLevelIndex >= count - 1;
+      const infinite =
+        this.bundle.procgen === true && this.bundle.infiniteLevels === true;
+      const isFinal =
+        !infinite && this.session.currentLevelIndex >= count - 1;
       this.ui.showLevelComplete(
         'Level complete',
         'Press Enter to continue.',
@@ -346,12 +355,7 @@ export class GameApplication {
   }
 
   _focusPlay() {
-    const names = this.bundle?.levelNames ?? [];
-    const idx = this.session.currentLevelIndex;
-    const name =
-      names[idx] ??
-      this.bundle?.levels?.[idx]?.displayName ??
-      '';
+    const name = formatLevelLabel(this.session.currentLevelIndex);
     this.ui.showPlaying(name, this._devMode);
     this.canvas?.focus();
   }
@@ -369,7 +373,7 @@ export class GameApplication {
 
     let descriptor;
     if (this.bundle.procgen) {
-      descriptor = generateProcgenDescriptor(index, this.bundle.levelNames ?? []);
+      descriptor = generateProcgenDescriptor(index);
     } else {
       descriptor = this.bundle.levels?.[index];
     }

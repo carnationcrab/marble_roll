@@ -1,6 +1,5 @@
 {
   "schemaVersion": 2,
   "procgen": true,
-  "levelCount": 8,
-  "levelNames": ["1", "2", "3", "4", "5", "6", "7", "8"]
+  "infiniteLevels": true
 }
