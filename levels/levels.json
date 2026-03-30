@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 2,
+  "procgen": true,
+  "levelCount": 8,
+  "levelNames": [
+    "Intern Basement",
+    "Junior Associate",
+    "Team Lead",
+    "Middle Management",
+    "Director",
+    "VP",
+    "C-Suite",
+    "CEO Roof Helipad"
+  ]
+}
