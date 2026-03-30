@@ -2,6 +2,12 @@
 
 Static web game served over HTTP (ES modules and asset fetches require a server; opening `index.html` from the file system is not supported).
 
+## Play online
+
+A build is hosted on GitHub Pages:
+
+**[https://carnationcrab.github.io/marble_roll/](https://carnationcrab.github.io/marble_roll/)**
+
 ## Run locally
 
 From this directory (`marble_roll`):

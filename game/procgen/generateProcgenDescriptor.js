@@ -152,7 +152,7 @@ export function generateProcgenDescriptor(levelIndex, levelNames = []) {
 
   const killPlaneY = computeKillPlaneY(offset.static);
 
-  const displayName = levelNames[levelIndex] ?? `Rung ${levelIndex + 1}`;
+  const displayName = levelNames[levelIndex] ?? String(levelIndex + 1);
 
   return {
     id: `procgen_${levelIndex}`,
