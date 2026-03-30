@@ -7,6 +7,9 @@ const ROAD_TEXTURE_TILE_UNITS = 12;
 /**
  * Builds static level geometry for cannon-es and Three.js; supports teardown.
  * Supports optional `zones` (flat disc markers) instead of a single spherical goal.
+ *
+ * Procedural descriptors from `generateProcgenDescriptor` — `marble_roll/gen/docs/PROCEDURAL_L_SYSTEM_LEVELS.md`.
+ * Design intent: `marble_roll/gen/docs/LEVEL_DESIGN_AND_PROCEDURE.md`. Theme: `marble_roll/gen/docs/THE_LADDER.md`.
  */
 export class LevelLoader {
   constructor() {

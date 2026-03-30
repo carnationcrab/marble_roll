@@ -1,12 +1,25 @@
 /**
- * Procedural level descriptors from L-system expansion + turtle geometry (single main spine).
- * Conceptual reference: generative / L-system architecture (e.g. Hansmeyer-style systems —
- * https://michael-hansmeyer.com/l-systems.html ).
+ * Procedural level descriptors from a **spine string** + turtle geometry (single main path).
+ * Default spine: **Compton & Mateas–style** motif concatenation (`comptonRhythm.js`); optional
+ * legacy **parallel L-system** via `GameplaySettings.procgen.useComptonRhythmLayer`.
+ * After the turtle, a **connectivity audit** may append forward symbols and rebuild (capped).
+ * Conceptual L-system reference: e.g. Hansmeyer — https://michael-hansmeyer.com/l-systems.html
  *
- * Pipeline: expand (non-branching spine) → budgets → preferRamps → level-map splices → turtle → …
- * (see gen/docs/PROCEDURAL_L_SYSTEM_LEVELS.md).
+ * Pipeline: spine → budgets → preferRamps → level-map splices → turtle → (audit / repair) → …
+ *
+ * Documentation (under `marble_roll/gen/docs/`):
+ * - **PROCEDURAL_L_SYSTEM_LEVELS.md** — normative pipeline and descriptor contract.
+ * - **LEVEL_DESIGN_AND_PROCEDURE.md** — design methodology, skills, obstacles, agency (informs tuning).
+ * - **THE_LADDER.md** — creative theme; future hazard ideas are evaluated against the level-design doc.
  */
 import { expandLSystem } from './lSystemExpand.js';
+import {
+  GameplaySettings,
+  procgenLSystemIterations,
+  procgenTurtleStep,
+} from '../config/GameplaySettings.js';
+import { composeRhythmSpineString } from './comptonRhythm.js';
+import { auditStaticPathGaps } from './connectivityAudit.js';
 import {
   applyLevelMapSplices,
   countTurnSymbols,
@@ -38,15 +51,19 @@ const ZONE_SURFACE_Y = 0.04;
  * @returns {Record<string, string>}
  */
 function spineRulesForLevel(levelIndex) {
+  /**
+   * Alternating **`+`** / **`-`** chunks so the plan view **weaves** left and right instead of
+   * drifting in one direction (spiral). Each variant keeps **`r`** and **`F`** for length and ramps.
+   */
   const variants = [
-    { F: 'FrFF+F' },
-    { F: 'FFrF-F' },
-    { F: 'F+F+rFF' },
-    { F: 'FrF+F-F' },
-    { F: 'FF+rFF' },
-    { F: 'Fr+F-FF' },
-    { F: 'F+rFrF' },
-    { F: 'FFr+F-F' },
+    { F: 'F+FrF-F+Fr' },
+    { F: 'Fr-F+F+rF-F' },
+    { F: 'F-F+rF+F+Fr' },
+    { F: 'FF+rF-F+F' },
+    { F: 'F+rF-F+FrF' },
+    { F: 'Fr+F-FrF+F' },
+    { F: 'F-F+FFr-F+F' },
+    { F: 'F+Fr-F+F+rF' },
   ];
   return variants[levelIndex % variants.length];
 }
@@ -58,22 +75,55 @@ function spineRulesForLevel(levelIndex) {
  */
 export function generateProcgenDescriptor(levelIndex, levelNames = []) {
   const rules = spineRulesForLevel(levelIndex);
-  const iterations = Math.min(2 + Math.min(levelIndex, 3), 4);
-  /** Sharper corners (≈32–53°) so routes read more like winding platforms than gentle curves. */
-  const angleDeg = 32 + (levelIndex % 7) * 3;
+  const iterations = procgenLSystemIterations(levelIndex);
+  /** Wider turn angle so left/right segments read clearly in plan view (≈38–58°). */
+  const angleDeg = 38 + (levelIndex % 6) * 4;
   const angleRad = (angleDeg * Math.PI) / 180;
-  const step = 2.1 + levelIndex * 0.08;
-  /** Rise per `^`; kept below typical jump height for mass≈2, impulse≈6.5. */
-  const verticalStep = 0.38;
-  /** Target vertical offset per splice gap (~one jump clearance vs `verticalStep` symbols). */
-  const jumpClearance = 0.92;
+  const step = procgenTurtleStep(levelIndex);
+  const pg = GameplaySettings.procgen;
+  /** Rise per `^`; from `GameplaySettings.procgen.verticalStep` (PROCEDURAL §3.3). */
+  const verticalStep = pg.verticalStep;
+  /** Splice vertical budget; from `GameplaySettings.procgen.jumpClearance` (§3.7). */
+  const jumpClearance = pg.jumpClearance;
 
-  let expanded = expandLSystem('F', rules, iterations, { maxLength: 120_000 });
-  expanded = ensureTurnBudget(expanded, levelIndex);
-  expanded = ensureVerticalBudget(expanded, levelIndex);
-  expanded = preferRampsOverStepJumps(expanded, levelIndex);
-  const beforeSplices = expanded;
-  expanded = applyLevelMapSplices(expanded, levelIndex, verticalStep, jumpClearance);
+  let core = pg.useComptonRhythmLayer
+    ? composeRhythmSpineString(levelIndex)
+    : expandLSystem('F', rules, iterations, { maxLength: pg.legacyLSystemMaxLength });
+
+  const maxRepair = pg.comptonRhythmRepairMaxPasses;
+  let repairPasses = 0;
+  /** @type {string} */
+  let expanded;
+  /** @type {string} */
+  let beforeSplices;
+  /** @type {ReturnType<typeof turtleBuildPlatforms>} */
+  let built;
+  let lastAudit = { ok: true, maxGapXZ: 0, failIndex: -1 };
+
+  while (true) {
+    let e = core;
+    e = ensureTurnBudget(e, levelIndex);
+    e = ensureVerticalBudget(e, levelIndex);
+    e = preferRampsOverStepJumps(e, levelIndex);
+    beforeSplices = e;
+    e = applyLevelMapSplices(e, levelIndex, verticalStep, jumpClearance);
+    built = turtleBuildPlatforms(e, {
+      step,
+      angleRad,
+      verticalStep,
+      platformHalfExtentXZ: pg.platformHalfExtentXZ,
+      platformHalfExtentY: pg.platformHalfExtentY,
+      zoneRadius: ZONE_RADIUS,
+      zoneSurfaceY: ZONE_SURFACE_Y,
+    });
+    lastAudit = auditStaticPathGaps(built.static, step, pg.connectivityMaxGapFactor);
+    if (lastAudit.ok || repairPasses >= maxRepair) {
+      expanded = e;
+      break;
+    }
+    core += 'F'.repeat(2 + repairPasses);
+    repairPasses++;
+  }
 
   const stepsPerSplice = Math.max(
     2,
@@ -84,16 +134,6 @@ export function generateProcgenDescriptor(levelIndex, levelNames = []) {
     levelIndex > 0 && stepsPerSplice > 0
       ? Math.round(spliceInsertChars / stepsPerSplice)
       : 0;
-
-  const built = turtleBuildPlatforms(expanded, {
-    step,
-    angleRad,
-    verticalStep,
-    platformHalfExtentXZ: 1.05,
-    platformHalfExtentY: 0.22,
-    zoneRadius: ZONE_RADIUS,
-    zoneSurfaceY: ZONE_SURFACE_Y,
-  });
 
   let staticEntries = widenPlatforms(built.static, levelIndex);
   staticEntries = applySegmentStyles(staticEntries, levelIndex);
@@ -129,6 +169,11 @@ export function generateProcgenDescriptor(levelIndex, levelNames = []) {
       verticalStep,
       jumpClearance,
       mainPathSpine: true,
+      comptonRhythm: pg.useComptonRhythmLayer,
+      rhythmRepairPasses: repairPasses,
+      connectivityOk: lastAudit.ok,
+      maxGapXZ: lastAudit.maxGapXZ,
+      connectivityMaxGapFactor: pg.connectivityMaxGapFactor,
       expandedLength: expanded.length,
       expandedLengthBeforeSplices: beforeSplices.length,
       spliceSiteCount,

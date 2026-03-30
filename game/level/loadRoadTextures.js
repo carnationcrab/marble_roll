@@ -1,19 +1,19 @@
 import * as THREE from 'three';
+import { AssetSettings } from '../config/AssetSettings.js';
 
 /**
- * Loads diffuse maps from `assets/road/` (shipped set: `Road1_B.png`, `Road6_B.png`).
- * Straight segments use Road1_B; the spawn plaza tile uses Road6_B.
+ * Loads diffuse maps for road presentation (PROCEDURAL §5.8).
+ * Paths come from {@link AssetSettings.road}.
  *
  * @returns {Promise<{ straight: THREE.Texture, plaza: THREE.Texture }>}
  */
 export function loadRoadTextures() {
   const loader = new THREE.TextureLoader();
-  const base = new URL('../../assets/road/', import.meta.url);
 
-  const loadOne = (filename) =>
+  const loadOne = (url) =>
     new Promise((resolve, reject) => {
       loader.load(
-        new URL(filename, base).href,
+        url,
         (tex) => {
           tex.colorSpace = THREE.SRGBColorSpace;
           tex.wrapS = THREE.RepeatWrapping;
@@ -26,8 +26,8 @@ export function loadRoadTextures() {
       );
     });
 
-  return Promise.all([loadOne('Road1_B.png'), loadOne('Road6_B.png')]).then(([straight, plaza]) => ({
-    straight,
-    plaza,
-  }));
+  return Promise.all([
+    loadOne(AssetSettings.road.straightDiffuse),
+    loadOne(AssetSettings.road.plazaDiffuse),
+  ]).then(([straight, plaza]) => ({ straight, plaza }));
 }

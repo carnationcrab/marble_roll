@@ -4,11 +4,13 @@
 **Code:** `game/procgen/` in the `marble_roll` project  
 **Status:** The **full pipeline** in §2 (expand **main spine** → budgets → **`preferRampsOverStepJumps`** → **`applyLevelMapSplices`** → turtle → widen → **`applySegmentStyles`** → obstacles → offset) is **implemented** and **normative**. **§§3.4–3.7** (turn budget, vertical budget, ramp preference, **level-map splices**), **§4** (turtle alphabet including **`r`**), **§§5.1–5.7** (widths, zones, descriptor, **`trackBaseY`**, obstacles), **`procgenMeta`** (§5.4), and **§5.8** (road presentation in `LevelLoader`, optional textures) are **normative** for compatibility and QA replays.
 
+**Relationship to design methodology:** `LEVEL_DESIGN_AND_PROCEDURE.md` describes **goals** (skills, affordances, obstacle vocabulary, agency, roadmap). **`PROCGEN_COMPTON_MATEAS.md`** tracks adoption of Compton & Mateas (AIIDE 2006): **rhythm motifs**, **connectivity**, and future hierarchy work. **This document** describes **what the code does today** — by default **`composeRhythmSpineString`** (motif concatenation) or **legacy** `expandLSystem`, then the same budgets → splices → turtle → post-process chain; **`connectivityAudit`** may **repair** the spine string before obstacles. Future refactors should update **both** documents when behaviour changes.
+
 ---
 
 ## 1. Purpose
 
-Levels are **not** authored as static JSON geometry for the main run. Each rung is **generated at load time** from a **parallel L-system** (string rewriting) that first defines a **single main forward path** (a **spine** — no **`[` / `]`** branches in the shipped rule set): a continuous centreline that **curves** like a marble course via turns and ramps. After budgets and ramp preference, a **splice** pass (**§3.7**) may, on rungs **`levelIndex ≥ 1`**, insert bursts of **`^`** or **`v`** so the **remainder** of the path shifts **up or down** by roughly **one jump’s vertical clearance** at each gap. A **turtle** then lays **horizontal tiles**, **sloped ramps** (`r`), and **height changes** (`^` / `v`), with **start** and **end** touch zones at the path extremities. Post-stages assign **deterministic** widths and **`materialKey`** labels (**`plaza`**, **`path`**, **`pathWide`**, **`ramp`**) so `LevelLoader` can style segments. **Geometry and physics** come only from the descriptor; **presentation** is either **diffuse-mapped road tops** (when textures load) or **flat `MeshStandardMaterial` colours** (fallback) — see §5.8.
+Levels are **not** authored as static JSON geometry for the main run. Each rung is **generated at load time** from a **symbol spine**: by default **`comptonRhythm.composeRhythmSpineString`** concatenates **motifs** (deterministic from `levelIndex`); if **`GameplaySettings.procgen.useComptonRhythmLayer`** is **false**, the legacy **parallel L-system** (`expandLSystem`) is used instead. The spine defines a **single main forward path** (no **`[` / `]`** branches in the shipped rule set): a continuous centreline that **curves** like a marble course via turns and ramps. After budgets and ramp preference, a **splice** pass (**§3.7**) may, on rungs **`levelIndex ≥ 1`**, insert bursts of **`^`** or **`v`** so the **remainder** of the path shifts **up or down** by roughly **one jump’s vertical clearance** at each gap. A **turtle** then lays **horizontal tiles**, **sloped ramps** (`r`), and **height changes** (`^` / `v`), with **start** and **end** touch zones at the path extremities. Post-stages assign **deterministic** widths and **`materialKey`** labels (**`plaza`**, **`path`**, **`pathWide`**, **`ramp`**) so `LevelLoader` can style segments. **Geometry and physics** come only from the descriptor; **presentation** is either **diffuse-mapped road tops** (when textures load) or **flat `MeshStandardMaterial` colours** (fallback) — see §5.8.
 
 This document specifies the **L formula** (axiom, production rules, iterations), **post-expansion string passes**, the **turtle alphabet**, numerical parameters, **budgets**, **segment styling**, **obstacles**, **`trackBaseY`**, the **level descriptor** contract for `LevelLoader.build`, and how **`materialKey`** maps to **visuals** without changing the procgen contract.
 
@@ -27,11 +29,12 @@ flowchart TB
   end
   subgraph procgen [Per level index — deterministic geometry]
     gen[generateProcgenDescriptor]
-    expand[expandLSystem spine]
+    expand[rhythm string or expandLSystem]
     budgets[turn and vertical budgets]
     ramps[preferRampsOverStepJumps]
     splices[applyLevelMapSplices]
     turtle[turtleBuildPlatforms]
+    audit[connectivity audit plus optional repair]
     widen[widenPlatforms]
     styles[applySegmentStyles]
     obstacles[placeObstacles]
@@ -41,7 +44,8 @@ flowchart TB
     budgets --> ramps
     ramps --> splices
     splices --> turtle
-    turtle --> widen
+    turtle --> audit
+    audit --> widen
     widen --> styles
     styles --> obstacles
     obstacles --> offset
@@ -55,7 +59,7 @@ flowchart TB
 **Bootstrap vs procgen:** **`loadRoadTextures`** runs **once** after the manifest is fetched; it does **not** read the L-string and does **not** affect **`generateProcgenDescriptor`**. It only populates optional **`THREE.Texture`** references on the materials object passed into **`LevelLoader.build`**. If loading fails, **`roadStraight`** is absent and §5.8 fallback applies.
 
 1. **`levels.json`** supplies `levelCount`, `levelNames`, and `procgen: true` (read before first level; same fetch is the entry point for the procgen pipeline below).
-2. **`expandLSystem`** produces the expanded symbol string from the axiom and **non-branching** spine rules (§3.2) — one **main forward** route to the finish.
+2. **Spine string:** **`composeRhythmSpineString`** (default) or **`expandLSystem`** with the axiom and **non-branching** spine rules (§3.2) — one **main forward** route. A **connectivity audit** (`auditStaticPathGaps`) runs after the turtle; failed audits **append** forward symbols to the core and **rebuild** (capped by **`comptonRhythmRepairMaxPasses`**).
 3. **Budget passes** (§§3.4–3.5) may **append** **`+`/`-`** and **`r`** symbols so **turn** and **vertical** minimums are met **deterministically**.
 4. **`preferRampsOverStepJumps`** may rewrite many **`^F`** pairs into **`r`** (sloped ramp) for a clearer **floating-course** read.
 5. **`applyLevelMapSplices`** (§3.7) **does nothing** on **`levelIndex === 0`**. On later rungs it inserts **`^`** / **`v`** bursts so the **tail** of the path shifts vertically by ~**jump clearance** at each **splice site** (platforms are built on the resulting polyline in §4).
@@ -70,7 +74,9 @@ flowchart TB
 
 | Stage | Module |
 |--------|--------|
-| Expand | `lSystemExpand.js` |
+| Rhythm spine (default) | `comptonRhythm.js` |
+| Expand (legacy) | `lSystemExpand.js` |
+| Connectivity audit | `connectivityAudit.js` |
 | Turn / vertical budgets, **`preferRampsOverStepJumps`**, **`applyLevelMapSplices`** | `lSystemPostExpand.js` |
 | Turtle + ramp box helper | `lSystemTurtlePlatforms.js`, `rampOrientation.js` |
 | Widen, segment styles, obstacles, offset, kill plane | `postProcessProcgen.js` |
@@ -78,6 +84,26 @@ flowchart TB
 | Orchestration | `generateProcgenDescriptor.js` |
 | Road diffuse load (bootstrap) | `loadRoadTextures.js` |
 | Static mesh + body build, §5.8 presentation | `LevelLoader.js` |
+
+**Code ↔ documentation map:** implementation modules under `game/procgen/` (and `GameplaySettings.procgen`, `LevelLoader`, optional `loadRoadTextures`) carry file-level comments pointing to:
+
+| Document | Role |
+|----------|------|
+| **LEVEL_DESIGN_AND_PROCEDURE.md** | Design methodology — skills, affordances, obstacle reference, challenge, agency, roadmap. |
+| **PROCGEN_COMPTON_MATEAS.md** | Target procgen overhaul (Compton & Mateas 2006): rhythm, repetition, connectivity; migration from this pipeline. |
+| **PROCEDURAL_L_SYSTEM_LEVELS.md** (this file) | Normative pipeline, symbols, descriptor fields, presentation §5.8. |
+| **THE_LADDER.md** | Creative direction — corporate ladder theme; future hazards evaluated against the level-design doc. |
+
+```mermaid
+flowchart LR
+  LDP[LEVEL_DESIGN_AND_PROCEDURE]
+  PLSL[PROCEDURAL_L_SYSTEM_LEVELS]
+  Ladder[THE_LADDER]
+  Code[game/procgen and procgen tuning]
+  PLSL -->|normative for| Code
+  LDP -.->|informs goals| Code
+  Ladder -.->|theme / future content| LDP
+```
 
 ---
 
@@ -88,7 +114,7 @@ flowchart TB
 - **Axiom:** initial string. Implementation uses **`F`**.
 - **Production rules:** a map from **single-character predecessors** to **replacement strings**. Only **`F`** is rewritten; all other symbols are **terminal** and pass through unchanged when no rule exists.
 - **Parallel rewriting:** each generation replaces **every** character in the string **simultaneously** according to the rules (standard L-system step).
-- **Iterations:** the expansion is applied a fixed number of times **`n`**, with **`n = min(2 + min(levelIndex, 3), 4)`** (so between **2** and **4** inclusive).
+- **Iterations:** the expansion is applied **`n`** times, from **`GameplaySettings`** via **`procgenLSystemIterations(levelIndex)`**: rung **0** uses **`lSystemIterationsLevel0`** (**1** — short tutorial); rungs **≥ 1** start at **`lSystemIterationsAfterLevel0`** (**2**) and gain **one** extra pass every **`lSystemIterationsEveryNLevels`** (**3**) rungs, capped at **`lSystemIterationsCap`** (**6**).
 - **Length cap:** expansion may be **truncated** at **120 000** characters to bound memory and frame time (`expandLSystem` `maxLength` option).
 
 ### 3.2 Rule sets per level (main spine — no branching)
@@ -97,16 +123,16 @@ Rules are **deterministic** from **`levelIndex`**. One of **eight** fixed **non-
 
 | Variant | Rule for `F` |
 |--------|----------------|
-| 0 | `FrFF+F` |
-| 1 | `FFrF-F` |
-| 2 | `F+F+rFF` |
-| 3 | `FrF+F-F` |
-| 4 | `FF+rFF` |
-| 5 | `Fr+F-FF` |
-| 6 | `F+rFrF` |
-| 7 | `FFr+F-F` |
+| 0 | `F+FrF-F+Fr` |
+| 1 | `Fr-F+F+rF-F` |
+| 2 | `F-F+rF+F+Fr` |
+| 3 | `FF+rF-F+F` |
+| 4 | `F+rF-F+FrF` |
+| 5 | `Fr+F-FrF+F` |
+| 6 | `F-F+FFr-F+F` |
+| 7 | `F+Fr-F+F+rF` |
 
-Each variant mixes **`r`** (ramp), **`F`**, and **turns** so the **main path** curves without alternate branches. **`[`** / **`]`** remain in the turtle alphabet (§4) for compatibility but **do not** appear in the shipped spine expansions.
+Each variant **alternates** **`+`** and **`-`** in long blocks so the route **weaves** left and right in plan view; **`r`** and **`F`** carry length and ramps. **`[`** / **`]`** remain in the turtle alphabet (§4) for compatibility but **do not** appear in the shipped spine expansions.
 
 ### 3.3 Level-scaled angles and step
 
@@ -114,8 +140,8 @@ After expansion, the turtle uses:
 
 | Parameter | Formula / notes |
 |-----------|------------------|
-| **Branch angle** | `angleDeg = 32 + (levelIndex % 7) * 3` (degrees), converted to radians — **tighter** corners than gentle arcs |
-| **Step length** | `step = 2.1 + levelIndex * 0.08` (world units per `F` or `G`) |
+| **Branch angle** | `angleDeg = 38 + (levelIndex % 6) * 4` (degrees), converted to radians — clearer **left/right** separation in plan view |
+| **Step length** | `procgenTurtleStep(levelIndex)` = `turtleStepBase + levelIndex * turtleStepPerLevel` (defaults **2.05** + **0.04** per rung — gentle growth) |
 | **Vertical step** | `verticalStep` (e.g. **0.38** world units per **`^`** / **`v`**) — must stay within plausible jump height for the marble |
 
 These change the **geometry** without changing the **discrete** L-string (same symbol sequence for a given variant and iteration count).
@@ -130,15 +156,12 @@ Let **`turnSymbols(s)`** be the number of **`+`** and **`-`** characters in stri
 
 | `levelIndex` | Minimum `turnSymbols(s)` |
 |----------------|---------------------------|
-| **0** (first level) | **≥ 1** |
-| **1** | **≥ 1** |
-| **2, 3** | **≥ 2** |
-| **4, 5** | **≥ 3** |
-| … | **≥ `1 + ⌊levelIndex / 2⌋`** |
+| **0, 1** | **≥ 3** |
+| **2, 3** | **≥ 4** |
+| **4, 5** | **≥ 5** |
+| … | **≥ `minTurnCountBase + ⌊levelIndex / minTurnCountLevelStride⌋`** (see **`procgenMinTurnCount`**) |
 
-So the **first** rung always includes **at least one** deliberate direction change, and the required minimum **rises every two** indices (an extra turn **every other** level step).
-
-**If** the expanded string from §3.1–3.2 alone would yield **`turnSymbols(s) < minTurnCount(levelIndex)`**, the implementation shall **deterministically** satisfy the shortfall — for example by **appending** a suffix of **`+`** / **`-`** symbols derived from **`levelIndex`** and **`expandedLength`** (e.g. alternate **`+-`** or repeat **`+`**), then passing the result to the turtle. Injection must be **reproducible** and must not use runtime randomness.
+**If** the expanded string from §3.1–3.2 alone would yield **`turnSymbols(s) < minTurnCount(levelIndex)`**, the implementation shall **deterministically** append **`+F-`** / **`-F+`** blocks (alternating from a hash of **`levelIndex`** and string length) until the budget is met. Each block adds **two** turn symbols and **forward** tiles so the injected tail **weaves** instead of only yawing in place. Injection must be **reproducible** and must not use runtime randomness.
 
 **Note:** Raising **iterations** (§3.1) or choosing **rule variants** with more **`+`/`-`** may already meet the budget; injection is a **fallback** to guarantee the floor.
 
@@ -222,10 +245,10 @@ The expanded string is scanned **left to right**. State: position **`(x, z)`**, 
 ### 5.1 Platforms, minimum width, and segment styling
 
 - Each solid is a **box** collider and mesh (`type: 'box'`). Turtle baseline: **`platformHalfExtentXZ = 1.05`**, **`platformHalfExtentY = hy`** (e.g. **0.22**).
-- **Path width** uses **`GameplaySettings.js`**: **`procgenPathHalfXZBase(levelIndex)`** interpolates from an **early bonus** down to **`pathPlatformHalfXZFloor`** (slightly under the legacy **1.2** minimum) over **`pathPlatformWidthDecayLevels`** rungs (smoothstep). Per-tile width is **`base + span`** with the same deterministic **`span`** hash as before (see **`pathHalfXZSpan*`** in settings).
+- **Path width** uses **`GameplaySettings.js`**: **`procgenPathHalfXZBase(levelIndex)`** interpolates from a **large early bonus** (≈ **2×** prior early width) down to **`pathPlatformHalfXZFloor`** over **`pathPlatformWidthDecayLevels`** rungs (smoothstep). Per-tile width is **`base + span`** (see **`pathHalfXZSpan*`** in settings).
 - **Export** **`MIN_PLATFORM_HALF_XZ`** in **`postProcessProcgen.js`** equals **`GameplaySettings.procgen.pathPlatformHalfXZFloor`** (late-run floor). After **`widenPlatforms(staticEntries, levelIndex)`**, tiles use **`hx, hz ≥ procgenMinPlatformHalfXZ(levelIndex)`**. **Ramps:** only **`hx`** is raised to that minimum; **`hz`** stays **half the slope length** **`L/2`**.
 - **`applySegmentStyles`** (runs **after** widen) sets final **XZ** half-extents and **`materialKey`**:
-  - **Index 0** (spawn pad): **`plazaHalfXZ`** from settings (e.g. **2.35**), **`materialKey: 'plaza'`**.
+  - **Index 0** (spawn pad): **`plazaHalfXZ`** from settings (e.g. **~4.7**), **`materialKey: 'plaza'`**.
   - **Other horizontal tiles:** **`w`** as above. Occasional boosted strips use **`pathWideDelta`** / **`pathWideCap`**. **`pathWide`** material when **`wide > procgenPathHalfXZBase(levelIndex) + pathWideOverBase`**.
   - **Ramps:** cross-path half-width **`max(procgenMinPlatformHalfXZ(levelIndex), w)`**; **`materialKey`** remains **`'ramp'`**.
 - **`LevelLoader.build`** maps **`materialKey`** to **visuals** (§5.8); **`lattice`** entries keep the lattice material when **`lattice: true`**.
@@ -273,7 +296,7 @@ Gameplay logic requires **touching the start zone** before **the end zone** can 
 
 - **`id`**, **`displayName`**, **`spawn`**, **`static`**, **`zones: { start, end }`**, **`killPlaneY`**, **`trackBaseY`** (same value passed into offset; useful for UI or debugging)
 - **`static[]` entries** (boxes): **`type`**, **`halfExtents`**, **`position`**, **`quaternion`** (axis-angle **`[x,y,z,w]`**, default identity for flat tiles), optional **`collision: false`** (lattice), optional **`lattice: true`**, optional **`materialKey`** (`'plaza' | 'path' | 'pathWide' | 'ramp'`)
-- **`procgenMeta`:** **`iterations`**, **`angleDeg`**, **`step`**, **`verticalStep`**, **`jumpClearance`**, **`mainPathSpine: true`**, **`expandedLength`** (final string **after** §§3.4–3.7), **`expandedLengthBeforeSplices`**, **`spliceSiteCount`**, **`spliceVerticalStepsPerSite`** (0 on first rung), **`turnSymbolCount`**, **`minTurnCount`**, **`verticalSymbolCount`** (count of **`^`**, **`r`**, and **`v`** in the final string), **`minVerticalSymbolCount`**, **`obstacleSeeds`** with **`latticeIndex`**, **`gapIndex`**, **`obstacleCount`**
+- **`procgenMeta`:** **`iterations`**, **`angleDeg`**, **`step`**, **`verticalStep`**, **`jumpClearance`**, **`mainPathSpine: true`**, **`comptonRhythm`**, **`rhythmRepairPasses`**, **`connectivityOk`**, **`maxGapXZ`**, **`connectivityMaxGapFactor`**, **`expandedLength`** (final string **after** §§3.4–3.7), **`expandedLengthBeforeSplices`**, **`spliceSiteCount`**, **`spliceVerticalStepsPerSite`** (0 on first rung), **`turnSymbolCount`**, **`minTurnCount`**, **`verticalSymbolCount`** (count of **`^`**, **`r`**, and **`v`** in the final string), **`minVerticalSymbolCount`**, **`obstacleSeeds`** with **`latticeIndex`**, **`gapIndex`**, **`obstacleCount`**
 
 Symbol counts in **`procgenMeta`** reflect the **final** expanded L-string (after **`preferRampsOverStepJumps`** and **`applyLevelMapSplices`**).
 
@@ -289,7 +312,7 @@ Symbol counts in **`procgenMeta`** reflect the **final** expanded L-string (afte
 
 ### 5.6 Obstacles (normative)
 
-Each procedural level shall include **at least one** and **at most two** **obstacle sites**, chosen **deterministically** from **`levelIndex`**, rule **variant**, and a digest of the **expanded string length** (or tile index list), so QA and replays reproduce layouts.
+Each procedural level shall include **at least one** and **at most two** **obstacle sites**, chosen **deterministically** from **`levelIndex`**, rule **variant**, and a digest of the **expanded string length** (or tile index list), so QA and replays reproduce layouts. **`placeObstacles`** applies when **`staticEntries.length ≥ 2`**: if only two boxes exist, the **non-spawn** tile is forced to **lattice**; if more, a **gap** may be cut only when the path has more than **`GameplaySettings.procgen.minStaticCountForGap`** boxes (default **5**, i.e. **`n ≥ 6`**), then a **lattice** site is chosen on the shortened array when possible.
 
 | Type | Description |
 |------|-------------|
@@ -336,3 +359,9 @@ Changing **§5.8** texture filenames, **`ROAD_TEXTURE_TILE_UNITS`**, face-select
 | 7 | 2026-03-29 | **§5.8** road presentation: **`loadRoadTextures`**, **`assets/road/`** PNGs, **`LevelLoader`** six-face boxes, bootstrap vs procgen in §2 diagram; §1 / §5.1 / §6 cross-links; module table rows |
 | 8 | 2026-03-29 | **Main spine** (non-branching rules §3.2); **`applyLevelMapSplices`** §3.7; pipeline and **`procgenMeta`** updated; first rung unspliced |
 | 9 | 2026-03-29 | **`GameplaySettings.js`**: level-scaled path width (early wider, decays to floor **1.08**); **`widenPlatforms(static, levelIndex)`**; §5.1 updated |
+| 10 | 2026-03-29 | Weaving spine rules; **`+F-`/`-F+`** turn injection; higher **`minTurnCount`**; wider **`angleDeg`**; iterations **3–5**; early path ≈2× width + larger **`plazaHalfXZ`** |
+| 11 | 2026-03-29 | Shorter early rungs: **`lSystemIterationsLevel0: 1`**, banded iteration growth + cap; lower **`procgenMinTurnCount`**; **`turtleStepPerLevel`** small vs old **0.08** |
+| 12 | 2026-03-29 | Header **relationship** to **`LEVEL_DESIGN_AND_PROCEDURE.md`** (methodology vs implementation) |
+| 13 | 2026-03-29 | §2 **Code ↔ documentation map** (table + mermaid); `game/procgen` and related files cite all three docs |
+| 14 | 2026-03-29 | **Implementation sync:** `GameplaySettings.procgen` holds `verticalStep`, `jumpClearance`, platform half-extents, `minVerticalSymbolLevelStride`, `minStaticCountForGap`; `procgenMinVerticalSymbolCount`; `placeObstacles` guarantees ≥1 obstacle when **`n ≥ 2`** (§5.6) |
+| 15 | 2026-03-30 | **Compton & Mateas target:** §1 relationship + §2 docs table link **`PROCGEN_COMPTON_MATEAS.md`**; L-system noted as interim |

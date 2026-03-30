@@ -9,30 +9,17 @@ export class InputSystem {
     this._prevKeys = new Set();
     /** @type {Set<string>} */
     this._edgeDown = new Set();
-    /** Caps Lock toggle state from last keyboard event (OS LED on). */
-    this._capsLockModifierOn = false;
 
     this._onKeyDown = (e) => {
-      this._syncCapsLockFromEvent(e);
       if (e.repeat) return;
       this._keys.add(e.code);
     };
     this._onKeyUp = (e) => {
       this._keys.delete(e.code);
-      this._syncCapsLockFromEvent(e);
     };
 
     window.addEventListener('keydown', this._onKeyDown);
     window.addEventListener('keyup', this._onKeyUp);
-  }
-
-  /**
-   * @param {KeyboardEvent} e
-   */
-  _syncCapsLockFromEvent(e) {
-    if (typeof e.getModifierState === 'function') {
-      this._capsLockModifierOn = e.getModifierState('CapsLock');
-    }
   }
 
   dispose() {
@@ -66,10 +53,10 @@ export class InputSystem {
   }
 
   /**
-   * Brake: Caps Lock key held (brief) or Caps Lock modifier active (toggle LED on).
+   * Brake: left or right Shift held (no toggle — released when the key is released).
    * @returns {boolean}
    */
   isBrakeActive() {
-    return this._keys.has('CapsLock') || this._capsLockModifierOn;
+    return this._keys.has('ShiftLeft') || this._keys.has('ShiftRight');
   }
 }

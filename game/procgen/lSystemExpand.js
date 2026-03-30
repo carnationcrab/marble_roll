@@ -2,6 +2,8 @@
  * Parallel L-system string expansion (e.g. Prusinkiewicz & Lindenmayer).
  * Each generation replaces every symbol according to `rules`; symbols with no rule pass through.
  *
+ * Documentation: **PROCEDURAL_L_SYSTEM_LEVELS.md** (§3); **LEVEL_DESIGN_AND_PROCEDURE.md** (course length / iterations).
+ *
  * @param {string} axiom
  * @param {Record<string, string>} rules
  * @param {number} iterations

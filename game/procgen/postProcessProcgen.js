@@ -1,11 +1,16 @@
 /**
- * Post-processing stages for procedural levels (see gen/docs/PROCEDURAL_L_SYSTEM_LEVELS.md).
+ * Post-processing stages for procedural levels: widen, segment styles, obstacles, track offset, kill plane.
+ *
+ * Documentation: **PROCEDURAL_L_SYSTEM_LEVELS.md** (§5, obstacles); **LEVEL_DESIGN_AND_PROCEDURE.md**
+ * (§4 reference obstacles, §6 challenge knobs, §8 agency vs width); **THE_LADDER.md** (flavour hazards — roadmap).
  */
 import {
   GameplaySettings,
   procgenMinPlatformHalfXZ,
   procgenPathHalfXZBase,
 } from '../config/GameplaySettings.js';
+
+const { minStaticCountForGap } = GameplaySettings.procgen;
 
 /** Late-run minimum path half-extent XZ (floor after width decay); matches `GameplaySettings.procgen`. */
 export const MIN_PLATFORM_HALF_XZ = GameplaySettings.procgen.pathPlatformHalfXZFloor;
@@ -160,6 +165,7 @@ export function computeKillPlaneY(staticEntries) {
 
 /**
  * Inserts 1–2 obstacles: optional jump gap (remove one tile), then a lattice tile (no collider).
+ * PROCEDURAL §5.6: at least one and at most two sites; deterministic from `levelIndex` and spine length.
  * @param {object[]} staticEntries
  * @param {number} levelIndex
  * @param {number} expandedLength
@@ -171,7 +177,18 @@ export function placeObstacles(staticEntries, levelIndex, expandedLength) {
   /** @type {{ latticeIndex: number, gapIndex: number, obstacleCount: number }} */
   const meta = { latticeIndex: -1, gapIndex: -1, obstacleCount: 0 };
 
-  if (n < 3) {
+  if (n < 2) {
+    return { static: arr, meta };
+  }
+
+  /** Two tiles only (e.g. degenerate string): lattice the path segment — §5.6 minimum one obstacle. */
+  if (n === 2) {
+    const latticeIdx = 1;
+    arr = arr.map((e, i) =>
+      i === latticeIdx ? { ...e, collision: false, lattice: true } : e,
+    );
+    meta.latticeIndex = latticeIdx;
+    meta.obstacleCount = 1;
     return { static: arr, meta };
   }
 
@@ -179,7 +196,7 @@ export function placeObstacles(staticEntries, levelIndex, expandedLength) {
   const iMin = 1;
   const iMax = n - 2;
 
-  const wantGap = n > 5;
+  const wantGap = n > minStaticCountForGap;
   if (wantGap) {
     const gapIdx = iMin + (hash % (iMax - iMin + 1));
     arr.splice(gapIdx, 1);
@@ -190,6 +207,17 @@ export function placeObstacles(staticEntries, levelIndex, expandedLength) {
   const n2 = arr.length;
   const iMin2 = 1;
   const iMax2 = n2 - 2;
+
+  if (n2 === 2) {
+    const latticeIdx = 1;
+    arr = arr.map((e, i) =>
+      i === latticeIdx ? { ...e, collision: false, lattice: true } : e,
+    );
+    meta.latticeIndex = latticeIdx;
+    meta.obstacleCount += 1;
+    return { static: arr, meta };
+  }
+
   if (iMax2 >= iMin2) {
     const h2 = (hash >> 11) >>> 0;
     const latticeIdx = iMin2 + (h2 % (iMax2 - iMin2 + 1));

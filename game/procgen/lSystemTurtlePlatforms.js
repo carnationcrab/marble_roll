@@ -1,6 +1,8 @@
 /**
  * Interprets an L-system string as a 2.5D turtle: `F`/`G` lay flat tiles, `r` lays a sloped ramp
  * (rise + forward), `^` / `v` adjust deck height, `+` / `-` turn, `[` / `]` branch.
+ *
+ * Documentation: **PROCEDURAL_L_SYSTEM_LEVELS.md** (§4–5); **LEVEL_DESIGN_AND_PROCEDURE.md** (§3 affordances, §7 traversal).
  */
 import { buildRampBox } from './rampOrientation.js';
 

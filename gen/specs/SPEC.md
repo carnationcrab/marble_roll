@@ -11,6 +11,8 @@ This document is the behavioural and data contract for the HTML-only Marble Blas
 
 Deliver a **small-scale, Marble Blast Gold–inspired** browser game: a **3D marble** rolls under **rigid-body physics**, a **third-person camera** follows, and the player completes **levels** (implemented as **procedural courses**: a **non-branching L-system spine** to the goal, then optional **vertical splices** on later rungs — see `gen/docs/PROCEDURAL_L_SYSTEM_LEVELS.md`) driven by `levels.json` by reaching **zones** / a **goal**. The product is **truly HTML-only**: static assets, **no** application bundler and **no** TypeScript compile step. **Track appearance** (optional diffuse textures for path segments) is a **presentation layer** on top of the level descriptor — see [§5.2.1](#521-track-presentation-procgen-aligned).
 
+**Design intent vs implementation:** `gen/docs/LEVEL_DESIGN_AND_PROCEDURE.md` records **methodology** (skills, affordances, obstacle vocabulary, agency, roadmap). `gen/docs/PROCEDURAL_L_SYSTEM_LEVELS.md` remains the **normative implementation** spec for the **current** generator (`game/procgen/`). This technical spec does not duplicate those documents; it binds behaviour and data contracts.
+
 This slice proves **architecture** (bootstrap, game loop, state machine, command queue, level loading) and **core gameplay**, not feature parity with the original title.
 
 ---
@@ -186,6 +188,7 @@ Held in a single **session** object (name may vary), including at least:
 
 **Normative for the current implementation** (`marble_roll`):
 
+- **Design layer:** For *why* courses are shaped and how obstacles are thought about, see **`gen/docs/LEVEL_DESIGN_AND_PROCEDURE.md`**. For the exact **L-system pipeline** and descriptor fields, see **`gen/docs/PROCEDURAL_L_SYSTEM_LEVELS.md`**.
 - **Separation:** Procedural **geometry** is defined entirely in **`game/procgen/`** (`generateProcgenDescriptor` → static box list with **`materialKey`**). The generator builds a **single main forward path** (spine), then **splices** vertical offsets from rung 2 onward; **road texturing** does **not** affect layout; it only affects **Three.js** materials inside **`LevelLoader`** and **`GameApplication`** bootstrap.
 - **Bootstrap:** After **`levels.json`** loads, **`GameApplication`** may **`loadRoadTextures()`** (`game/level/loadRoadTextures.js`), resolving **`assets/road/Road1_B.png`** and **`Road6_B.png`** via **`import.meta.url`**. Success attaches **`roadStraight`** / **`roadPlaza`** on the shared materials object passed to **`LevelLoader.build`**; failure keeps **flat** `MeshStandardMaterial` segment colours (gameplay unchanged).
 - **Build-time:** For each **non-lattice** box, if **`roadStraight`** is set, **`LevelLoader`** uses a **multi-material box** with a **textured +Y (top) face** (walkable surface in mesh space, including sloped **`ramp`** segments) and solid **side** materials; **`lattice`** and **zones** are unaffected.

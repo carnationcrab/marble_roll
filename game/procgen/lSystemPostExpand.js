@@ -1,6 +1,11 @@
 /**
- * Deterministic post-expansion constraints on the L-system string (see PROCEDURAL_L_SYSTEM_LEVELS.md).
+ * Deterministic post-expansion constraints on the L-system string.
+ *
+ * Documentation: **PROCEDURAL_L_SYSTEM_LEVELS.md** (§§3.4–3.7); **LEVEL_DESIGN_AND_PROCEDURE.md**
+ * (challenge, splices, affordances); **THE_LADDER.md** (theme — vertical / office motifs align with splices).
  */
+
+import { procgenMinTurnCount, procgenMinVerticalSymbolCount } from '../config/GameplaySettings.js';
 
 /**
  * @param {string} s
@@ -47,20 +52,22 @@ export function countVerticalMotionSymbols(s) {
  * @returns {number}
  */
 export function minTurnCountForLevel(levelIndex) {
-  return 1 + Math.floor(levelIndex / 2);
+  return procgenMinTurnCount(levelIndex);
 }
 
 /**
- * At least one vertical step symbol on every rung; scales slowly with level.
+ * Minimum `^` + `r` symbols before splices (PROCEDURAL §3.5); delegated to GameplaySettings.
  * @param {number} levelIndex
  * @returns {number}
  */
 export function minVerticalSymbolCountForLevel(levelIndex) {
-  return Math.max(1, 1 + Math.floor(levelIndex / 3));
+  return procgenMinVerticalSymbolCount(levelIndex);
 }
 
 /**
- * Appends alternating `+` / `-` from a fixed hash until the turn budget is met.
+ * Until the turn budget is met, appends **`+F-`** / **`-F+`** blocks (deterministic alternation).
+ * Each block adds **two** turn symbols **and** forward motion so the tail **weaves** instead of
+ * spinning in place (bare **`+`/`-`** only changed yaw at the end of the string).
  * @param {string} expanded
  * @param {number} levelIndex
  * @returns {string}
@@ -68,12 +75,12 @@ export function minVerticalSymbolCountForLevel(levelIndex) {
 export function ensureTurnBudget(expanded, levelIndex) {
   const min = minTurnCountForLevel(levelIndex);
   let s = expanded;
-  let n = countTurnSymbols(s);
-  if (n >= min) return s;
-  const need = min - n;
+  if (countTurnSymbols(s) >= min) return s;
   const h = (levelIndex * 1315423911 + s.length) >>> 0;
-  for (let i = 0; i < need; i += 1) {
-    s += (h + i) % 2 === 0 ? '+' : '-';
+  let guard = 0;
+  while (countTurnSymbols(s) < min && guard < 8000) {
+    s += (h + guard) % 2 === 0 ? '+F-' : '-F+';
+    guard += 1;
   }
   return s;
 }

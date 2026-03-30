@@ -42,6 +42,8 @@ Difficulty is **not** framed as “easy / medium / hard.” It is tied to **job 
 
 **Design intent:** each promotion should introduce **new mechanics** (or new combinations), not only harder geometry. The title progression is both **funny** and **mechanically clean**.
 
+**How we evaluate hazards:** theme-specific ideas below should be checked against **`gen/docs/LEVEL_DESIGN_AND_PROCEDURE.md`** — skills tested, pairing with traversal situations, agency, and feasibility next to the current procedural pipeline.
+
 ---
 
 ## 3. Mechanical satire (memorable systems)
@@ -150,3 +152,4 @@ When technical features (materials, moving bodies, triggers) land, map them back
 | Version | Date | Notes |
 |---------|------|--------|
 | 1 | 2026-03-29 | Initial working concept captured from design brief |
+| 2 | 2026-03-29 | Pointer to **`LEVEL_DESIGN_AND_PROCEDURE.md`** for evaluating themed hazards |

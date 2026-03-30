@@ -5,10 +5,10 @@
 export const ControlSettings = {
   marble: {
     /** Torque magnitude applied along world axes (cannon-es). */
-    torqueStrength: 22,
+    torqueStrength: 20,
     /** Upward impulse (N·s) at the centre of mass when jumping (mass ≈ 2). ~13 → Δv ≈ 6.5 m/s with g = 28. */
     jumpImpulse: 13,
-    /** Exponential decay per second for linear (xz) and angular velocity while brake is held. */
+    /** Exponential decay per second for linear (xz) and angular velocity while Shift is held. */
     brakeLinearDecay: 9,
     brakeAngularDecay: 11,
     keys: {

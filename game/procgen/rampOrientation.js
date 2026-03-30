@@ -1,3 +1,8 @@
+/**
+ * Ramp box orientation helper for turtle-emitted segments.
+ *
+ * Documentation: **PROCEDURAL_L_SYSTEM_LEVELS.md** (ramp geometry); **LEVEL_DESIGN_AND_PROCEDURE.md** (ramp + jump situations).
+ */
 import * as THREE from 'three';
 
 /**
