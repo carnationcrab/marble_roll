@@ -11,6 +11,7 @@
 | Document | Role |
 |----------|------|
 | [PROCGEN_COMPTON_MATEAS.md](PROCGEN_COMPTON_MATEAS.md) | **Target** procgen methodology (Compton & Mateas 2006) and roadmap from current pipeline |
+| [PROCEDURAL_DRUNKARD_GRID_SPEC.md](PROCEDURAL_DRUNKARD_GRID_SPEC.md) | **Planned** grid drunkard-walk layout backend: phases, modules, contracts (not yet implemented) |
 | [PROCEDURAL_L_SYSTEM_LEVELS.md](PROCEDURAL_L_SYSTEM_LEVELS.md) | **Implementation** spec: current L-system pipeline, turtle, descriptor contract |
 | [../specs/SPEC.md](../specs/SPEC.md) | **Technical** contract: stack, commands, level bundle, MVP scope |
 | [THE_LADDER.md](THE_LADDER.md) | **Creative direction**: corporate ladder theme, flavour hazards |
@@ -38,7 +39,7 @@ flowchart TB
   PLSL -->|normative for| Code
 ```
 
-**Implementation traceability:** `game/procgen/*.js`, `GameplaySettings.procgen` in `game/config/GameplaySettings.js`, `LevelLoader`, and `loadRoadTextures` include file-level comments linking **this document**, **PROCEDURAL_L_SYSTEM_LEVELS.md**, and **THE_LADDER.md** (see also the code ↔ docs map in **PROCEDURAL_L_SYSTEM_LEVELS.md** §2).
+**Implementation traceability:** `game/procgen/*.js`, `GameplaySettings.procgen` in `game/config/GameplaySettings.js`, and `LevelLoader` link **this document**, **PROCEDURAL_L_SYSTEM_LEVELS.md**, and **THE_LADDER.md** (see also the code ↔ docs map in **PROCEDURAL_L_SYSTEM_LEVELS.md** §2).
 
 ---
 

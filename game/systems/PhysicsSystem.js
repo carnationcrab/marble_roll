@@ -1,13 +1,19 @@
-import { Body, RaycastResult, Sphere, Vec3, World } from 'cannon-es';
+import { Body, RaycastResult, SAPBroadphase, Sphere, Vec3, World } from 'cannon-es';
 
 const FIXED_HZ = 60;
 const FIXED_TIMESTEP = 1 / FIXED_HZ;
+/** Allow enough substeps when frames hitch (e.g. tab focus); low values leave time unsimulated → jitter. */
+const MAX_SUB_STEPS = 10;
 
 export class PhysicsSystem {
   constructor() {
     this.world = new World({
       gravity: new Vec3(0, -28, 0),
     });
+    /** Sweep-and-prune scales better than naive O(n²) when many static boxes overlap the broadphase. */
+    this.world.broadphase = new SAPBroadphase(this.world);
+    /** Default 10; slightly fewer iterations per step lowers CPU with many contacts; marble stays stable. */
+    this.world.solver.iterations = 8;
     /** @type {import('cannon-es').Body | null} */
     this.marbleBody = null;
     /** Marble collision radius (world units); must match visual mesh. */
@@ -58,9 +64,11 @@ export class PhysicsSystem {
     const shape = new Sphere(this.marbleRadius);
     const body = new Body({
       mass: 2,
-      linearDamping: 0.08,
-      angularDamping: 0.12,
+      linearDamping: 0.065,
+      angularDamping: 0.09,
       material: undefined,
+      /** Player sphere should never sleep — avoids sluggish re-acceleration after braking. */
+      allowSleep: false,
     });
     body.addShape(shape);
     body.position.set(spawn[0], spawn[1], spawn[2]);
@@ -80,17 +88,29 @@ export class PhysicsSystem {
    * @param {[number, number, number]} spawn
    */
   resetMarble(spawn) {
-    if (!this.marbleBody) return;
-    this.marbleBody.velocity.set(0, 0, 0);
-    this.marbleBody.angularVelocity.set(0, 0, 0);
-    this.marbleBody.position.set(spawn[0], spawn[1], spawn[2]);
-    this.marbleBody.quaternion.set(0, 0, 0, 1);
+    const b = this.marbleBody;
+    if (!b) return;
+    b.velocity.set(0, 0, 0);
+    b.angularVelocity.set(0, 0, 0);
+    b.position.set(spawn[0], spawn[1], spawn[2]);
+    b.quaternion.set(0, 0, 0, 1);
+    /**
+     * While `marbleDead`, `world.step` is not called — interpolation state stays at the fall pose.
+     * Without syncing, `interpolatedPosition` can lerp between old previous and new spawn for several
+     * frames (visible jitter). Match cannon-es `World.step` end-state for this body.
+     */
+    b.previousPosition.copy(b.position);
+    b.previousQuaternion.copy(b.quaternion);
+    b.interpolatedPosition.copy(b.position);
+    b.interpolatedQuaternion.copy(b.quaternion);
+    /** Avoid fractional interpolation phase carrying across a long pause without `step`. */
+    this.world.accumulator = 0;
   }
 
   /**
    * @param {number} deltaSeconds
    */
   step(deltaSeconds) {
-    this.world.step(FIXED_TIMESTEP, deltaSeconds, 3);
+    this.world.step(FIXED_TIMESTEP, deltaSeconds, MAX_SUB_STEPS);
   }
 }

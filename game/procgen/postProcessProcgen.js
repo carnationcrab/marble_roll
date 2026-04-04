@@ -8,12 +8,10 @@ import {
   GameplaySettings,
   procgenMinPlatformHalfXZ,
   procgenPathHalfXZBase,
+  procgenTurtleStep,
 } from '../config/GameplaySettings.js';
 
 const { minStaticCountForGap } = GameplaySettings.procgen;
-
-/** Late-run minimum path half-extent XZ (floor after width decay); matches `GameplaySettings.procgen`. */
-export const MIN_PLATFORM_HALF_XZ = GameplaySettings.procgen.pathPlatformHalfXZFloor;
 
 /** Wide starting pad (world units, half-extent XZ). */
 export const PLAZA_HALF_XZ = GameplaySettings.procgen.plazaHalfXZ;
@@ -58,7 +56,8 @@ export function applySegmentStyles(staticEntries, levelIndex) {
 
     if (e.materialKey === 'ramp') {
       const w = pathHalfXZ(levelIndex, i);
-      return { ...e, halfExtents: [Math.max(minXZ, w), hy, hz] };
+      const wx = clampPathHalfXZToTurtleStep(Math.max(minXZ, w), levelIndex);
+      return { ...e, halfExtents: [wx, hy, hz] };
     }
 
     if (i === 0) {
@@ -73,10 +72,12 @@ export function applySegmentStyles(staticEntries, levelIndex) {
     const h2 = (levelIndex * 7919 + i * 13) >>> 0;
     const wide =
       h2 % 9 === 0 ? Math.min(p.pathWideCap, w + p.pathWideDelta) : w;
+    const wideGrounded = Math.max(minXZ, wide);
+    const wideClamped = clampPathHalfXZToTurtleStep(wideGrounded, levelIndex);
     const key = wide > wideThreshold ? 'pathWide' : 'path';
     return {
       ...e,
-      halfExtents: [wide, hy, wide],
+      halfExtents: [wideClamped, hy, wideClamped],
       materialKey: key,
     };
   });
@@ -93,6 +94,16 @@ function pathHalfXZ(levelIndex, pathIndex) {
   const h = (levelIndex * 1103515245 + pathIndex * 12345) >>> 0;
   const span = p.pathHalfXZSpanMin + (h % p.pathHalfXZSpanSteps) * p.pathHalfXZSpanStep;
   return base + span;
+}
+
+/**
+ * Caps horizontal half-extent so consecutive slabs (centre spacing ≈ turtle step along straights) do not
+ * stay narrower than the step — `factor === 0.5` makes edges flush; lower values leave a hairline gap.
+ */
+function clampPathHalfXZToTurtleStep(halfXZ, levelIndex) {
+  const step = procgenTurtleStep(levelIndex);
+  const f = GameplaySettings.procgen.pathHalfXZClampStepFactor ?? 0.5;
+  return Math.min(halfXZ, step * f);
 }
 
 /**
@@ -157,7 +168,11 @@ export function computeKillPlaneY(staticEntries) {
   for (const e of staticEntries) {
     if (e.type !== 'box') continue;
     const hy = e.halfExtents[1];
-    const bottom = e.position[1] - hy;
+    /** Axis-aligned slabs: world min Y is centre minus local half height. Ramps use local Z along the slope — see `buildRampBox` (`minYBottom = midY - hy - L/2`). */
+    const bottom =
+      e.materialKey === 'ramp'
+        ? e.position[1] - hy - e.halfExtents[2]
+        : e.position[1] - hy;
     minY = Math.min(minY, bottom);
   }
   return Number.isFinite(minY) ? minY - 4 : -20;

@@ -1,31 +1,22 @@
 /**
- * Procedural level descriptors from a **spine string** + turtle geometry (single main path).
- * Default spine: **Compton & Mateas–style** motif concatenation (`comptonRhythm.js`); optional
- * legacy **parallel L-system** via `GameplaySettings.procgen.useComptonRhythmLayer`.
+ * Procedural level descriptors: **drunkard grid** spine → turtle geometry (single main path).
  * After the turtle, a **connectivity audit** may append forward symbols and rebuild (capped).
- * Conceptual L-system reference: e.g. Hansmeyer — https://michael-hansmeyer.com/l-systems.html
- *
- * Pipeline: spine → budgets → preferRamps → level-map splices → turtle → (audit / repair) → …
  *
  * Documentation (under `marble_roll/gen/docs/`):
- * - **PROCEDURAL_L_SYSTEM_LEVELS.md** — normative pipeline and descriptor contract.
- * - **LEVEL_DESIGN_AND_PROCEDURE.md** — design methodology, skills, obstacles, agency (informs tuning).
- * - **THE_LADDER.md** — creative theme; future hazard ideas are evaluated against the level-design doc.
+ * - **PROCEDURAL_L_SYSTEM_LEVELS.md** — turtle alphabet, descriptor contract.
+ * - **PROCEDURAL_DRUNKARD_GRID_SPEC.md** — grid layout pipeline.
+ * - **LEVEL_DESIGN_AND_PROCEDURE.md** — design methodology, affordances.
+ * - **THE_LADDER.md** — creative theme.
  */
-import { expandLSystem } from './lSystemExpand.js';
 import {
   GameplaySettings,
   procgenLSystemIterations,
   procgenTurtleStep,
 } from '../config/GameplaySettings.js';
-import { composeRhythmSpineString } from './comptonRhythm.js';
 import { auditStaticPathGaps } from './connectivityAudit.js';
 import {
-  applyLevelMapSplices,
   countTurnSymbols,
   countVerticalMotionSymbols,
-  ensureTurnBudget,
-  ensureVerticalBudget,
   minTurnCountForLevel,
   minVerticalSymbolCountForLevel,
   preferRampsOverStepJumps,
@@ -39,55 +30,82 @@ import {
   placeObstacles,
   widenPlatforms,
 } from './postProcessProcgen.js';
+import { buildSpineFromDrunkardGrid } from './gridSpinePipeline.js';
+import { injectJumpSplitsInSpine } from './injectJumpSplitsInSpine.js';
+import { placeCoinsOnPath } from './placeCoins.js';
 
 /** Marble radius matches PhysicsSystem default; pad is slightly wider than marble. */
 const ZONE_RADIUS = 0.62;
 const ZONE_SURFACE_Y = 0.04;
 
 /**
- * Non-branching rule variants: one continuous **main forward path** (no `[` / `]`), winding like a
- * marble course via **`r`**, **`F`**, **`+`/`-`**, and optional **`^`** in the replacement.
- * @param {number} levelIndex
- * @returns {Record<string, string>}
+ * Weights for {@link generateProcgenDescriptor} `onProgress.fraction` (sum = 1).
+ * Tunable without changing GameApplication’s global bar mapping.
  */
-function spineRulesForLevel(levelIndex) {
-  /**
-   * Alternating **`+`** / **`-`** chunks so the plan view **weaves** left and right instead of
-   * drifting in one direction (spiral). Each variant keeps **`r`** and **`F`** for length and ramps.
-   */
-  const variants = [
-    { F: 'F+FrF-F+Fr' },
-    { F: 'Fr-F+F+rF-F' },
-    { F: 'F-F+rF+F+Fr' },
-    { F: 'FF+rF-F+F' },
-    { F: 'F+rF-F+FrF' },
-    { F: 'Fr+F-FrF+F' },
-    { F: 'F-F+FFr-F+F' },
-    { F: 'F+Fr-F+F+rF' },
-  ];
-  return variants[levelIndex % variants.length];
+const PG_W_GRID = 0.15;
+const PG_W_INJECT = 0.1;
+const PG_W_TURTLE = 0.5;
+const PG_W_POST = 0.2;
+const PG_W_COINS = 0.05;
+
+const PHASE_LABELS = {
+  grid: 'Laying out course…',
+  inject: 'Placing jumps…',
+  turtle: 'Building path geometry…',
+  post: 'Styling track…',
+  coins: 'Placing collectibles…',
+};
+
+/**
+ * @typedef {object} GenerateProcgenProgressInfo
+ * @property {string} phase
+ * @property {number} fraction Overall procgen completion 0–1.
+ * @property {string} label Human-readable line for the load screen.
+ */
+
+/**
+ * @typedef {object} GenerateProcgenOptions
+ * @property {(info: GenerateProcgenProgressInfo) => void} [onProgress]
+ * @property {() => Promise<void>} [yieldForUi]
+ */
+
+/**
+ * @param {GenerateProcgenOptions | undefined} options
+ * @param {string} phase
+ * @param {number} fraction
+ */
+async function emitProcgenProgress(options, phase, fraction) {
+  options?.onProgress?.({
+    phase,
+    fraction,
+    label: PHASE_LABELS[phase] ?? phase,
+  });
+  if (options?.yieldForUi) await options.yieldForUi();
 }
 
 /**
  * @param {number} levelIndex
- * @returns {object} Level descriptor compatible with LevelLoader.build
+ * @param {GenerateProcgenOptions} [options]
+ * @returns {Promise<object>} Level descriptor for `LevelLoader.build`
  */
-export function generateProcgenDescriptor(levelIndex) {
-  const rules = spineRulesForLevel(levelIndex);
+export async function generateProcgenDescriptor(levelIndex, options = undefined) {
+  // Yield before any heavy sync work so the load screen can paint and show phase text.
+  await emitProcgenProgress(options, 'grid', 0);
+
   const iterations = procgenLSystemIterations(levelIndex);
-  /** Wider turn angle so left/right segments read clearly in plan view (≈38–58°). */
-  const angleDeg = 38 + (levelIndex % 6) * 4;
-  const angleRad = (angleDeg * Math.PI) / 180;
   const step = procgenTurtleStep(levelIndex);
   const pg = GameplaySettings.procgen;
-  /** Rise per `^`; from `GameplaySettings.procgen.verticalStep` (PROCEDURAL §3.3). */
   const verticalStep = pg.verticalStep;
-  /** Splice vertical budget; from `GameplaySettings.procgen.jumpClearance` (§3.7). */
   const jumpClearance = pg.jumpClearance;
 
-  let core = pg.useComptonRhythmLayer
-    ? composeRhythmSpineString(levelIndex)
-    : expandLSystem('F', rules, iterations, { maxLength: pg.legacyLSystemMaxLength });
+  const gridBundle = buildSpineFromDrunkardGrid(levelIndex, pg);
+  await emitProcgenProgress(options, 'grid', PG_W_GRID);
+
+  let core = gridBundle.spine;
+  const injected = injectJumpSplitsInSpine(core, levelIndex, pg);
+  core = injected.spine;
+  const angleRad = gridBundle.angleRad;
+  await emitProcgenProgress(options, 'inject', PG_W_GRID + PG_W_INJECT);
 
   const maxRepair = pg.comptonRhythmRepairMaxPasses;
   let repairPasses = 0;
@@ -99,13 +117,13 @@ export function generateProcgenDescriptor(levelIndex) {
   let built;
   let lastAudit = { ok: true, maxGapXZ: 0, failIndex: -1 };
 
+  const maxTurtleIters = maxRepair + 1;
+  let turtleIter = 0;
+
+  const tTurtle0 = performance.now();
   while (true) {
-    let e = core;
-    e = ensureTurnBudget(e, levelIndex);
-    e = ensureVerticalBudget(e, levelIndex);
-    e = preferRampsOverStepJumps(e, levelIndex);
+    let e = preferRampsOverStepJumps(core, levelIndex, pg);
     beforeSplices = e;
-    e = applyLevelMapSplices(e, levelIndex, verticalStep, jumpClearance);
     built = turtleBuildPlatforms(e, {
       step,
       angleRad,
@@ -116,6 +134,16 @@ export function generateProcgenDescriptor(levelIndex) {
       zoneSurfaceY: ZONE_SURFACE_Y,
     });
     lastAudit = auditStaticPathGaps(built.static, step, pg.connectivityMaxGapFactor);
+    turtleIter += 1;
+    const turtleFrac =
+      PG_W_GRID +
+      PG_W_INJECT +
+      PG_W_TURTLE * (turtleIter / maxTurtleIters);
+    await emitProcgenProgress(
+      options,
+      'turtle',
+      Math.min(turtleFrac, PG_W_GRID + PG_W_INJECT + PG_W_TURTLE),
+    );
     if (lastAudit.ok || repairPasses >= maxRepair) {
       expanded = e;
       break;
@@ -123,6 +151,11 @@ export function generateProcgenDescriptor(levelIndex) {
     core += 'F'.repeat(2 + repairPasses);
     repairPasses++;
   }
+  await emitProcgenProgress(
+    options,
+    'turtle',
+    PG_W_GRID + PG_W_INJECT + PG_W_TURTLE,
+  );
 
   const stepsPerSplice = Math.max(
     2,
@@ -133,6 +166,13 @@ export function generateProcgenDescriptor(levelIndex) {
     levelIndex > 0 && stepsPerSplice > 0
       ? Math.round(spliceInsertChars / stepsPerSplice)
       : 0;
+
+  const tPost0 = performance.now();
+  await emitProcgenProgress(
+    options,
+    'post',
+    PG_W_GRID + PG_W_INJECT + PG_W_TURTLE + PG_W_POST * 0.45,
+  );
 
   let staticEntries = widenPlatforms(built.static, levelIndex);
   staticEntries = applySegmentStyles(staticEntries, levelIndex);
@@ -150,6 +190,14 @@ export function generateProcgenDescriptor(levelIndex) {
   );
 
   const killPlaneY = computeKillPlaneY(offset.static);
+  await emitProcgenProgress(
+    options,
+    'post',
+    PG_W_GRID + PG_W_INJECT + PG_W_TURTLE + PG_W_POST,
+  );
+
+  const coins = placeCoinsOnPath(offset.static, offset.zones.end, levelIndex, step);
+  await emitProcgenProgress(options, 'coins', 1);
 
   const displayName = String(levelIndex + 1);
 
@@ -159,16 +207,30 @@ export function generateProcgenDescriptor(levelIndex) {
     spawn: offset.spawn,
     static: offset.static,
     zones: offset.zones,
+    coins,
     killPlaneY,
     trackBaseY,
     procgenMeta: {
       iterations,
-      angleDeg,
+      angleDeg: (angleRad * 180) / Math.PI,
       step,
       verticalStep,
       jumpClearance,
       mainPathSpine: true,
-      comptonRhythm: pg.useComptonRhythmLayer,
+      grid: {
+        width: gridBundle.layout.width,
+        height: gridBundle.layout.height,
+        roomsPlaced: gridBundle.layout.meta.roomsPlaced,
+        branchCarveSteps: gridBundle.layout.meta.branchCarveSteps,
+        mainSteps: gridBundle.spec.mainSteps,
+        gridAttempts: gridBundle.gridAttempts,
+        pathCells: gridBundle.plan.main.length,
+        maxDist: gridBundle.plan.maxDist,
+        goalCell: gridBundle.plan.goalCell,
+        jumpSplits: injected.jumpSplitCount,
+        gapJumps: injected.gapJumpCount,
+        heightJumps: injected.heightJumpCount,
+      },
       rhythmRepairPasses: repairPasses,
       connectivityOk: lastAudit.ok,
       maxGapXZ: lastAudit.maxGapXZ,
